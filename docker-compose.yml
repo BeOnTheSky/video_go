@@ -1,0 +1,179 @@
+services:
+  # ── 数据库 ──
+  mysql:
+    image: mysql:8.0
+    container_name: xilixili-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── 缓存 ──
+  redis:
+    image: redis:7-alpine
+    container_name: xilixili-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── 消息队列 ──
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: xilixili-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-xilixili}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?Set RABBITMQ_PASS in .env}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  # ── 对象存储 ──
+  minio:
+    image: xilixili-minio:7aac2a2c5b7c
+    build:
+      context: ./minio
+      target: server
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
+    container_name: xilixili-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO 初始化（创建 bucket + 公开策略） ──
+  create-buckets:
+    image: xilixili-mc:77f82e18b540
+    build:
+      context: ./minio
+      target: client
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
+    container_name: xilixili-minio-mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -ec "
+      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      /usr/bin/mc mb myminio/${MINIO_BUCKET} --ignore-existing;
+      /usr/bin/mc anonymous set download myminio/${MINIO_BUCKET};
+      "
+
+  # ── 后端 API ──
+  backend:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
+    container_name: xilixili-backend
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      SERVER_PORT: "8080"
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_USE_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      LOG_LEVEL: debug
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-xilixili}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:?Set RABBITMQ_PASS in .env}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      create-buckets:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  # ── 前端 Nuxt SSR ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: docker/Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    container_name: xilixili-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+
+  # ── Nginx 入口（HTTPS 反向代理） ──
+  nginx:
+    build:
+      context: ./nginx
+      args:
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
+    container_name: xilixili-nginx
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+      - "8443:443"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:

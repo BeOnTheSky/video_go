@@ -1,0 +1,84 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+*.env.local
+*.env.*.local
+
+# Node / Frontend
+node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/node_modules/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Build artifacts
+dist/
+*.pid
+
+# Cache files
+.cache/
+.cache-go/
+
+# SSL certificates (auto-generated, not committed)
+nginx/ssl/*.crt
+nginx/ssl/*.key
+
+# Backup data (auto-generated, large)
+backups/
+
+# Editor/IDE (personal)
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Project-specific generated files
+CLAUDE.md
+AGENTS.md
+bug-imgs/
+.claude/
+PROJECT-START.md
+docs/
+.reasonix/
+
+# Local dev scripts
+start.sh
+
+# Local runtime
+.local/
